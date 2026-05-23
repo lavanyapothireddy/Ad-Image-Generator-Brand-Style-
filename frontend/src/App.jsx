@@ -60,96 +60,126 @@ export default function App() {
   };
 
   const renderCanvas = (img, adData) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    const W = 1080, H = 1080;
-    canvas.width = W; canvas.height = H;
+  const canvas = canvasRef.current;
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const W = 1080, H = 1080;
+  canvas.width = W; canvas.height = H;
 
-    // Draw background image
-    ctx.drawImage(img, 0, 0, W, H);
+  // Background image
+  ctx.drawImage(img, 0, 0, W, H);
 
-    // Dark overlay gradient from bottom
-    const grad = ctx.createLinearGradient(0, H * 0.3, 0, H);
-    grad.addColorStop(0, "rgba(0,0,0,0)");
-    grad.addColorStop(0.5, "rgba(0,0,0,0.65)");
-    grad.addColorStop(1, "rgba(0,0,0,0.92)");
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, W, H);
+  // Dark gradient overlay — bottom 60%
+  const grad = ctx.createLinearGradient(0, H * 0.25, 0, H);
+  grad.addColorStop(0, "rgba(0,0,0,0)");
+  grad.addColorStop(0.4, "rgba(0,0,0,0.6)");
+  grad.addColorStop(1, "rgba(0,0,0,0.93)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
 
-    const palette = adData.brand_style_guide?.color_palette || ["#ff4d6d", "#7c3aed", "#f59e0b"];
-    const accent = palette[0] || "#ff4d6d";
-    const accent2 = palette[1] || "#7c3aed";
+  const palette = adData.brand_style_guide?.color_palette || ["#ff4d6d", "#7c3aed", "#f59e0b"];
+  const accent  = palette[0] || "#ff4d6d";
+  const accent2 = palette[1] || "#7c3aed";
 
-    // Top brand bar
-    const topGrad = ctx.createLinearGradient(0, 0, W, 0);
-    topGrad.addColorStop(0, accent + "dd");
-    topGrad.addColorStop(1, accent2 + "aa");
-    ctx.fillStyle = topGrad;
-    ctx.fillRect(0, 0, W, 72);
+  // ── TOP BAR ──────────────────────────────────────────
+  const topGrad = ctx.createLinearGradient(0, 0, W, 0);
+  topGrad.addColorStop(0, accent + "ee");
+  topGrad.addColorStop(1, accent2 + "bb");
+  ctx.fillStyle = topGrad;
+  ctx.fillRect(0, 0, W, 70);
 
-    // Brand name in bar
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 28px Arial";
-    ctx.letterSpacing = "6px";
-    ctx.fillText(form.brand_name.toUpperCase(), 36, 46);
+  // Brand name
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 30px Arial";
+  ctx.letterSpacing = "4px";
+  ctx.textBaseline = "middle";
+  ctx.fillText(form.brand_name.toUpperCase(), 36, 35);
 
-    // Ad type pill top right
-    ctx.fillStyle = "rgba(255,255,255,0.15)";
-    roundRect(ctx, W - 220, 16, 184, 40, 20);
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "13px Arial";
-    ctx.fillText(form.ad_type.toUpperCase(), W - 208, 41);
+  // Ad type — right aligned, no cutoff
+  ctx.font = "13px Arial";
+  ctx.letterSpacing = "2px";
+  const adTypeText = form.ad_type.toUpperCase();
+  const adTypeW = ctx.measureText(adTypeText).width;
+  // pill background
+  ctx.fillStyle = "rgba(255,255,255,0.18)";
+  roundRect(ctx, W - adTypeW - 60, 18, adTypeW + 36, 34, 17);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(adTypeText, W - adTypeW - 42, 35);
 
-    // Accent line
-    ctx.fillStyle = accent;
-    ctx.fillRect(36, H * 0.52, 6, 120);
+  // ── LEFT ACCENT LINE ─────────────────────────────────
+  ctx.fillStyle = accent;
+  ctx.fillRect(36, H * 0.50, 6, 130);
 
-    // Headline
-    ctx.fillStyle = "#ffffff";
-    ctx.font = `bold ${adData.headline.length > 25 ? 56 : 68}px Arial`;
-    wrapText(ctx, adData.headline.toUpperCase(), 56, H * 0.56, W - 100, 76);
+  // ── HEADLINE ─────────────────────────────────────────
+  ctx.letterSpacing = "1px";
+  ctx.textBaseline = "alphabetic";
+  const headlineSize = adData.headline.length > 20 ? 62 : 72;
+  ctx.font = `bold ${headlineSize}px Arial`;
+  ctx.fillStyle = "#ffffff";
+  const headlineY = wrapText(ctx, adData.headline.toUpperCase(), 56, H * 0.52, W - 80, headlineSize + 10);
 
-    // Subheadline
-    ctx.fillStyle = "rgba(255,255,255,0.82)";
-    ctx.font = "26px Arial";
-    wrapText(ctx, adData.subheadline, 56, H * 0.78, W - 100, 36);
+  // ── SUBHEADLINE ───────────────────────────────────────
+  ctx.font = "500 26px Arial";
+  ctx.letterSpacing = "0px";
+  ctx.fillStyle = "rgba(255,255,255,0.85)";
+  const subY = wrapText(ctx, adData.subheadline, 56, headlineY + 36, W - 80, 36);
 
-    // Body copy
-    ctx.fillStyle = "rgba(255,255,255,0.6)";
-    ctx.font = "18px Arial";
-    wrapText(ctx, adData.body_copy, 56, H * 0.86, W - 100, 26);
+  // ── BODY COPY ─────────────────────────────────────────
+  ctx.font = "18px Arial";
+  ctx.letterSpacing = "0px";
+  ctx.fillStyle = "rgba(255,255,255,0.60)";
+  const bodyY = wrapText(ctx, adData.body_copy, 56, subY + 30, W - 80, 28);
 
-    // CTA Button
-    const ctaW = Math.min(adData.cta.length * 18 + 60, 340);
-    const ctaX = 56, ctaY = H - 110;
-    const ctaGrad = ctx.createLinearGradient(ctaX, ctaY, ctaX + ctaW, ctaY);
-    ctaGrad.addColorStop(0, accent);
-    ctaGrad.addColorStop(1, accent2);
-    ctx.fillStyle = ctaGrad;
-    roundRect(ctx, ctaX, ctaY, ctaW, 56, 28);
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 20px Arial";
-    ctx.fillText(adData.cta.toUpperCase(), ctaX + 30, ctaY + 36);
+  // ── CTA BUTTON — always below body copy ──────────────
+  const ctaText = adData.cta.toUpperCase();
+  ctx.font = "bold 20px Arial";
+  ctx.letterSpacing = "1px";
+  const ctaTextW = ctx.measureText(ctaText).width;
+  const ctaW = ctaTextW + 70;
+  const ctaH = 58;
+  const ctaX = 56;
+  const ctaY = Math.max(bodyY + 30, H - 160); // never overlap body
 
-    // Tagline bottom right
-    if (form.tagline) {
-      ctx.fillStyle = "rgba(255,255,255,0.45)";
-      ctx.font = "italic 18px Arial";
-      const tw = ctx.measureText(`"${form.tagline}"`).width;
-      ctx.fillText(`"${form.tagline}"`, W - tw - 36, H - 36);
-    }
+  const ctaGrad = ctx.createLinearGradient(ctaX, ctaY, ctaX + ctaW, ctaY);
+  ctaGrad.addColorStop(0, accent);
+  ctaGrad.addColorStop(1, accent2);
+  ctx.fillStyle = ctaGrad;
+  roundRect(ctx, ctaX, ctaY, ctaW, ctaH, 29);
 
-    // Color palette dots bottom left
-    (palette).slice(0, 3).forEach((c, i) => {
-      ctx.fillStyle = c;
-      ctx.beginPath();
-      ctx.arc(W - 60 - i * 28, H - 36, 10, 0, Math.PI * 2);
-      ctx.fill();
-    });
+  ctx.fillStyle = "#ffffff";
+  ctx.textBaseline = "middle";
+  ctx.fillText(ctaText, ctaX + 35, ctaY + ctaH / 2);
 
-    setRendered(true);
-  };
+  // ── BOTTOM ROW: tagline left, swatches right ──────────
+  ctx.textBaseline = "alphabetic";
+  const bottomY = H - 28;
+
+  // Tagline bottom LEFT
+  if (form.tagline) {
+    ctx.font = "italic 17px Arial";
+    ctx.letterSpacing = "0px";
+    ctx.fillStyle = "rgba(255,255,255,0.45)";
+    ctx.fillText(`"${form.tagline}"`, 36, bottomY);
+  }
+
+  // Color swatches bottom RIGHT — with spacing
+  const swatchR = 11;
+  const swatchGap = 28;
+  const numSwatches = Math.min(palette.length, 3);
+  const swatchStartX = W - 36 - (numSwatches - 1) * swatchGap;
+  palette.slice(0, numSwatches).forEach((c, i) => {
+    ctx.fillStyle = c;
+    ctx.beginPath();
+    ctx.arc(swatchStartX + i * swatchGap, bottomY - swatchR, swatchR, 0, Math.PI * 2);
+    ctx.fill();
+    // white border
+    ctx.strokeStyle = "rgba(255,255,255,0.3)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  });
+
+  setRendered(true);
+};
 
   const regenerateImage = () => {
     if (!ad) return;
