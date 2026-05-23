@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
@@ -6,29 +6,31 @@ const TONES = ["Professional", "Playful", "Luxurious", "Bold & Edgy", "Minimalis
 const AD_TYPES = ["Social Media Post", "Billboard", "Banner Ad", "Story/Reel", "Print Magazine", "Email Header", "YouTube Thumbnail", "Product Launch"];
 const INDUSTRIES = ["Technology", "Fashion & Beauty", "Food & Beverage", "Healthcare", "Finance", "Real Estate", "Fitness & Wellness", "Education", "Travel", "Automotive", "Retail", "Entertainment"];
 
+function generateImageUrl(prompt) {
+  const full = prompt + ", professional advertisement, ultra high quality, 4k, cinematic lighting, commercial photography";
+  return `https://image.pollinations.ai/prompt/${encodeURIComponent(full)}?width=1024&height=1024&nologo=true&enhance=true&seed=${Math.floor(Math.random() * 99999)}`;
+}
+
 export default function App() {
   const [form, setForm] = useState({
     brand_name: "", tagline: "", industry: "", tone: "Professional",
     colors: "", audience: "", ad_type: "Social Media Post", extra_notes: ""
   });
-  const [result, setResult] = useState(null);
-  const [variations, setVariations] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [loadingVariations, setLoadingVariations] = useState(false);
+  const [ad, setAd] = useState(null);
+  const [imageUrl, setImageUrl] = useState("");
+  const [imageLoading, setImageLoading] = useState(false);
+  const [adLoading, setAdLoading] = useState(false);
   const [error, setError] = useState("");
-  const [refineFeedback, setRefineFeedback] = useState("");
-  const [refining, setRefining] = useState(false);
-  const [activeTab, setActiveTab] = useState("generator");
-  const [copied, setCopied] = useState("");
+  const [rendered, setRendered] = useState(false);
+  const canvasRef = useRef(null);
 
   const update = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
   const generate = async () => {
-    if (!form.brand_name || !form.industry) {
-      setError("Brand name and industry are required.");
-      return;
-    }
-    setLoading(true); setError(""); setResult(null); setVariations(null);
+    if (!form.brand_name || !form.industry) { setError("Brand name and industry are required."); return; }
+    setError(""); setAd(null); setImageUrl(""); setRendered(false);
+    setAdLoading(true);
+
     try {
       const res = await fetch(`${API_BASE}/api/generate`, {
         method: "POST",
@@ -36,375 +38,339 @@ export default function App() {
         body: JSON.stringify(form)
       });
       const data = await res.json();
-      if (data.success) { setResult(data.ad); setActiveTab("result"); }
-      else setError(data.error || "Generation failed.");
+      if (!data.success) { setError(data.error || "Generation failed."); setAdLoading(false); return; }
+
+      setAd(data.ad);
+      setAdLoading(false);
+      setImageLoading(true);
+
+      const url = generateImageUrl(data.ad.image_prompt);
+      const img = new window.Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        setImageUrl(url);
+        setImageLoading(false);
+        setTimeout(() => renderCanvas(img, data.ad), 100);
+      };
+      img.onerror = () => { setImageLoading(false); setError("Image generation failed. Try again."); };
+      img.src = url;
     } catch (e) {
-      setError("Cannot connect to server. Make sure the backend is running.");
+      setError("Cannot connect to server."); setAdLoading(false);
     }
-    setLoading(false);
   };
 
-  const refine = async () => {
-    if (!refineFeedback.trim()) return;
-    setRefining(true);
-    try {
-      const res = await fetch(`${API_BASE}/api/refine`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ existing_ad: result, feedback: refineFeedback, brand_name: form.brand_name })
-      });
-      const data = await res.json();
-      if (data.success) { setResult(data.ad); setRefineFeedback(""); }
-      else setError(data.error);
-    } catch (e) { setError("Refinement failed."); }
-    setRefining(false);
+  const renderCanvas = (img, adData) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const W = 1080, H = 1080;
+    canvas.width = W; canvas.height = H;
+
+    // Draw background image
+    ctx.drawImage(img, 0, 0, W, H);
+
+    // Dark overlay gradient from bottom
+    const grad = ctx.createLinearGradient(0, H * 0.3, 0, H);
+    grad.addColorStop(0, "rgba(0,0,0,0)");
+    grad.addColorStop(0.5, "rgba(0,0,0,0.65)");
+    grad.addColorStop(1, "rgba(0,0,0,0.92)");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    const palette = adData.brand_style_guide?.color_palette || ["#ff4d6d", "#7c3aed", "#f59e0b"];
+    const accent = palette[0] || "#ff4d6d";
+    const accent2 = palette[1] || "#7c3aed";
+
+    // Top brand bar
+    const topGrad = ctx.createLinearGradient(0, 0, W, 0);
+    topGrad.addColorStop(0, accent + "dd");
+    topGrad.addColorStop(1, accent2 + "aa");
+    ctx.fillStyle = topGrad;
+    ctx.fillRect(0, 0, W, 72);
+
+    // Brand name in bar
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 28px Arial";
+    ctx.letterSpacing = "6px";
+    ctx.fillText(form.brand_name.toUpperCase(), 36, 46);
+
+    // Ad type pill top right
+    ctx.fillStyle = "rgba(255,255,255,0.15)";
+    roundRect(ctx, W - 220, 16, 184, 40, 20);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "13px Arial";
+    ctx.fillText(form.ad_type.toUpperCase(), W - 208, 41);
+
+    // Accent line
+    ctx.fillStyle = accent;
+    ctx.fillRect(36, H * 0.52, 6, 120);
+
+    // Headline
+    ctx.fillStyle = "#ffffff";
+    ctx.font = `bold ${adData.headline.length > 25 ? 56 : 68}px Arial`;
+    wrapText(ctx, adData.headline.toUpperCase(), 56, H * 0.56, W - 100, 76);
+
+    // Subheadline
+    ctx.fillStyle = "rgba(255,255,255,0.82)";
+    ctx.font = "26px Arial";
+    wrapText(ctx, adData.subheadline, 56, H * 0.78, W - 100, 36);
+
+    // Body copy
+    ctx.fillStyle = "rgba(255,255,255,0.6)";
+    ctx.font = "18px Arial";
+    wrapText(ctx, adData.body_copy, 56, H * 0.86, W - 100, 26);
+
+    // CTA Button
+    const ctaW = Math.min(adData.cta.length * 18 + 60, 340);
+    const ctaX = 56, ctaY = H - 110;
+    const ctaGrad = ctx.createLinearGradient(ctaX, ctaY, ctaX + ctaW, ctaY);
+    ctaGrad.addColorStop(0, accent);
+    ctaGrad.addColorStop(1, accent2);
+    ctx.fillStyle = ctaGrad;
+    roundRect(ctx, ctaX, ctaY, ctaW, 56, 28);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 20px Arial";
+    ctx.fillText(adData.cta.toUpperCase(), ctaX + 30, ctaY + 36);
+
+    // Tagline bottom right
+    if (form.tagline) {
+      ctx.fillStyle = "rgba(255,255,255,0.45)";
+      ctx.font = "italic 18px Arial";
+      const tw = ctx.measureText(`"${form.tagline}"`).width;
+      ctx.fillText(`"${form.tagline}"`, W - tw - 36, H - 36);
+    }
+
+    // Color palette dots bottom left
+    (palette).slice(0, 3).forEach((c, i) => {
+      ctx.fillStyle = c;
+      ctx.beginPath();
+      ctx.arc(W - 60 - i * 28, H - 36, 10, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    setRendered(true);
   };
 
-  const genVariations = async () => {
-    setLoadingVariations(true);
-    try {
-      const res = await fetch(`${API_BASE}/api/variations`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brand_name: form.brand_name, industry: form.industry, tone: form.tone, count: 3 })
-      });
-      const data = await res.json();
-      if (data.success) setVariations(data.variations);
-    } catch (e) { setError("Variations failed."); }
-    setLoadingVariations(false);
+  const regenerateImage = () => {
+    if (!ad) return;
+    setRendered(false); setImageUrl(""); setImageLoading(true);
+    const url = generateImageUrl(ad.image_prompt);
+    const img = new window.Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => { setImageUrl(url); setImageLoading(false); setTimeout(() => renderCanvas(img, ad), 100); };
+    img.onerror = () => { setImageLoading(false); setError("Image failed. Try again."); };
+    img.src = url;
   };
 
-  const copy = (text, key) => {
-    navigator.clipboard.writeText(text);
-    setCopied(key);
-    setTimeout(() => setCopied(""), 2000);
+  const downloadAd = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const link = document.createElement("a");
+    link.download = `${form.brand_name.replace(/\s+/g, "_")}_ad.png`;
+    link.href = canvas.toDataURL("image/png");
+    link.click();
   };
 
-  const exportJSON = () => {
-    const blob = new Blob([JSON.stringify({ brand: form, ad: result }, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url;
-    a.download = `${form.brand_name.replace(/\s+/g, "_")}_ad.json`; a.click();
-  };
+  const isLoading = adLoading || imageLoading;
 
   return (
-    <div style={styles.root}>
-      {/* Header */}
-      <header style={styles.header}>
-        <div style={styles.headerInner}>
-          <div style={styles.logo}>
-            <div style={styles.logoIcon}>◈</div>
-            <div>
-              <div style={styles.logoTitle}>BRANDFORGE</div>
-              <div style={styles.logoSub}>AI Ad Generator</div>
-            </div>
+    <div style={S.root}>
+      <header style={S.header}>
+        <div style={S.logoWrap}>
+          <span style={S.logoMark}>◈</span>
+          <div>
+            <div style={S.logoTitle}>BRANDFORGE</div>
+            <div style={S.logoSub}>AI Ad Image Generator</div>
           </div>
-          <div style={styles.badge}>Powered by Groq × LLaMA 3.3</div>
         </div>
+        <div style={S.pill}>Groq × LLaMA 3.3 × Pollinations</div>
       </header>
 
-      {/* Tabs */}
-      <div style={styles.tabBar}>
-        {["generator", "result", "variations"].map(tab => (
-          <button key={tab} onClick={() => setActiveTab(tab)}
-            style={{ ...styles.tab, ...(activeTab === tab ? styles.tabActive : {}) }}>
-            {tab === "generator" ? "⚡ Generator" : tab === "result" ? "🎨 Ad Output" : "🔀 Variations"}
+      <div style={S.layout}>
+        {/* LEFT — Form */}
+        <aside style={S.sidebar}>
+          <div style={S.sectionLabel}>BRAND DETAILS</div>
+
+          {[
+            { label: "Brand Name *", key: "brand_name", placeholder: "e.g. NovaSkin" },
+            { label: "Tagline", key: "tagline", placeholder: "e.g. Glow from within" },
+            { label: "Brand Colors", key: "colors", placeholder: "e.g. Deep navy, gold, cream" },
+            { label: "Target Audience", key: "audience", placeholder: "e.g. Women 25-40" },
+          ].map(({ label, key, placeholder }) => (
+            <div key={key} style={S.field}>
+              <label style={S.label}>{label}</label>
+              <input style={S.input} placeholder={placeholder} value={form[key]}
+                onChange={e => update(key, e.target.value)} />
+            </div>
+          ))}
+
+          <div style={S.field}>
+            <label style={S.label}>Industry *</label>
+            <select style={S.select} value={form.industry} onChange={e => update("industry", e.target.value)}>
+              <option value="">Select...</option>
+              {INDUSTRIES.map(i => <option key={i}>{i}</option>)}
+            </select>
+          </div>
+
+          <div style={S.field}>
+            <label style={S.label}>Brand Tone</label>
+            <select style={S.select} value={form.tone} onChange={e => update("tone", e.target.value)}>
+              {TONES.map(t => <option key={t}>{t}</option>)}
+            </select>
+          </div>
+
+          <div style={S.field}>
+            <label style={S.label}>Ad Format</label>
+            <select style={S.select} value={form.ad_type} onChange={e => update("ad_type", e.target.value)}>
+              {AD_TYPES.map(t => <option key={t}>{t}</option>)}
+            </select>
+          </div>
+
+          <div style={S.field}>
+            <label style={S.label}>Extra Notes</label>
+            <textarea style={S.textarea} rows={3}
+              placeholder="Seasonal theme, competitor edge, special message..."
+              value={form.extra_notes} onChange={e => update("extra_notes", e.target.value)} />
+          </div>
+
+          {error && <div style={S.error}>{error}</div>}
+
+          <button style={{ ...S.btn, ...(isLoading ? S.btnOff : {}) }} onClick={generate} disabled={isLoading}>
+            {isLoading ? <><Spin /> {adLoading ? "Writing Ad Copy..." : "Generating Image (10-20s)..."}</> : "⚡ Generate Ad Image"}
           </button>
-        ))}
-      </div>
 
-      <main style={styles.main}>
-        {/* GENERATOR TAB */}
-        {activeTab === "generator" && (
-          <div style={styles.grid}>
-            <section style={styles.formCard}>
-              <div style={styles.sectionLabel}>BRAND IDENTITY</div>
-
-              <div style={styles.fieldGroup}>
-                <label style={styles.label}>Brand Name *</label>
-                <input style={styles.input} placeholder="e.g. NovaSkin" value={form.brand_name}
-                  onChange={e => update("brand_name", e.target.value)} />
-              </div>
-
-              <div style={styles.fieldGroup}>
-                <label style={styles.label}>Tagline</label>
-                <input style={styles.input} placeholder="e.g. Glow from within" value={form.tagline}
-                  onChange={e => update("tagline", e.target.value)} />
-              </div>
-
-              <div style={styles.fieldGroup}>
-                <label style={styles.label}>Industry *</label>
-                <select style={styles.select} value={form.industry} onChange={e => update("industry", e.target.value)}>
-                  <option value="">Select industry...</option>
-                  {INDUSTRIES.map(i => <option key={i}>{i}</option>)}
-                </select>
-              </div>
-
-              <div style={styles.twoCol}>
-                <div style={styles.fieldGroup}>
-                  <label style={styles.label}>Brand Tone</label>
-                  <select style={styles.select} value={form.tone} onChange={e => update("tone", e.target.value)}>
-                    {TONES.map(t => <option key={t}>{t}</option>)}
-                  </select>
-                </div>
-                <div style={styles.fieldGroup}>
-                  <label style={styles.label}>Ad Format</label>
-                  <select style={styles.select} value={form.ad_type} onChange={e => update("ad_type", e.target.value)}>
-                    {AD_TYPES.map(t => <option key={t}>{t}</option>)}
-                  </select>
-                </div>
-              </div>
-
-              <div style={styles.fieldGroup}>
-                <label style={styles.label}>Brand Colors</label>
-                <input style={styles.input} placeholder="e.g. Deep navy, gold, cream white" value={form.colors}
-                  onChange={e => update("colors", e.target.value)} />
-              </div>
-
-              <div style={styles.fieldGroup}>
-                <label style={styles.label}>Target Audience</label>
-                <input style={styles.input} placeholder="e.g. Women 25-40, skincare enthusiasts" value={form.audience}
-                  onChange={e => update("audience", e.target.value)} />
-              </div>
-
-              <div style={styles.fieldGroup}>
-                <label style={styles.label}>Additional Notes</label>
-                <textarea style={styles.textarea} rows={3} placeholder="Any special requirements, competitor differentiation, seasonal theme, etc."
-                  value={form.extra_notes} onChange={e => update("extra_notes", e.target.value)} />
-              </div>
-
-              {error && <div style={styles.error}>{error}</div>}
-
-              <button style={{ ...styles.btn, ...(loading ? styles.btnDisabled : {}) }}
-                onClick={generate} disabled={loading}>
-                {loading ? <><span style={styles.spinner}></span> Crafting Your Ad...</> : "⚡ Generate Ad"}
+          {rendered && (
+            <div style={S.actionGroup}>
+              <button style={S.btn} onClick={downloadAd}>⬇ Download PNG</button>
+              <button style={{ ...S.btn, ...S.btnGhost }} onClick={regenerateImage} disabled={imageLoading}>
+                🔄 New Image
               </button>
-            </section>
+            </div>
+          )}
+        </aside>
 
-            {/* Preview Panel */}
-            <section style={styles.previewPanel}>
-              <div style={styles.sectionLabel}>LIVE PREVIEW</div>
-              {result ? (
-                <AdPreview ad={result} brandName={form.brand_name} />
-              ) : (
-                <div style={styles.emptyPreview}>
-                  <div style={styles.emptyIcon}>◈</div>
-                  <p>Fill in brand details and click Generate to see your ad come to life</p>
-                </div>
-              )}
-            </section>
-          </div>
-        )}
+        {/* RIGHT — Canvas Output */}
+        <main style={S.canvasWrap}>
+          {!rendered && !isLoading && (
+            <div style={S.placeholder}>
+              <div style={S.placeholderIcon}>◈</div>
+              <p style={S.placeholderText}>Your complete ad image will appear here</p>
+              <p style={S.placeholderSub}>Fill in the form and click Generate</p>
+            </div>
+          )}
 
-        {/* RESULT TAB */}
-        {activeTab === "result" && result && (
-          <div style={styles.resultLayout}>
-            <div style={styles.resultLeft}>
-              <AdPreview ad={result} brandName={form.brand_name} large />
-
-              {/* Refine */}
-              <div style={styles.refineBox}>
-                <div style={styles.sectionLabel}>REFINE WITH AI</div>
-                <div style={styles.refineRow}>
-                  <input style={{ ...styles.input, flex: 1 }}
-                    placeholder="e.g. Make headline more emotional, change CTA to be urgent..."
-                    value={refineFeedback} onChange={e => setRefineFeedback(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && refine()} />
-                  <button style={{ ...styles.btn, ...styles.btnSm, ...(refining ? styles.btnDisabled : {}) }}
-                    onClick={refine} disabled={refining}>
-                    {refining ? "..." : "Refine"}
-                  </button>
-                </div>
+          {isLoading && (
+            <div style={S.placeholder}>
+              <Spin large />
+              <p style={S.placeholderText}>
+                {adLoading ? "✍️ Writing ad copy with Groq..." : "🎨 Generating image with AI..."}
+              </p>
+              <p style={S.placeholderSub}>
+                {imageLoading ? "This takes 10–20 seconds — free GPU queue" : ""}
+              </p>
+              <div style={S.progressBar}>
+                <div style={{ ...S.progressFill, width: adLoading ? "35%" : "85%" }} />
               </div>
             </div>
+          )}
 
-            <div style={styles.resultRight}>
-              {/* Copy sections */}
-              {[
-                { key: "headline", label: "HEADLINE", value: result.headline },
-                { key: "subheadline", label: "SUBHEADLINE", value: result.subheadline },
-                { key: "body_copy", label: "BODY COPY", value: result.body_copy },
-                { key: "cta", label: "CALL TO ACTION", value: result.cta },
-              ].map(({ key, label, value }) => (
-                <div key={key} style={styles.copyBlock}>
-                  <div style={styles.copyBlockHeader}>
-                    <span style={styles.copyLabel}>{label}</span>
-                    <button style={styles.copyBtn} onClick={() => copy(value, key)}>
-                      {copied === key ? "✓ Copied" : "Copy"}
-                    </button>
-                  </div>
-                  <p style={styles.copyText}>{value}</p>
-                </div>
-              ))}
+          <canvas
+            ref={canvasRef}
+            style={{
+              ...S.canvas,
+              display: rendered ? "block" : "none"
+            }}
+          />
 
-              {/* Image Prompt */}
-              <div style={styles.copyBlock}>
-                <div style={styles.copyBlockHeader}>
-                  <span style={styles.copyLabel}>🖼 IMAGE PROMPT</span>
-                  <button style={styles.copyBtn} onClick={() => copy(result.image_prompt, "img")}>
-                    {copied === "img" ? "✓ Copied" : "Copy for Midjourney/DALL-E"}
-                  </button>
-                </div>
-                <p style={{ ...styles.copyText, fontFamily: "var(--font-mono)", fontSize: 12, color: "#a78bfa" }}>
-                  {result.image_prompt}
-                </p>
-              </div>
-
-              {/* Style Guide */}
-              {result.brand_style_guide && (
-                <div style={styles.copyBlock}>
-                  <div style={styles.copyBlockHeader}>
-                    <span style={styles.copyLabel}>🎨 BRAND STYLE GUIDE</span>
-                  </div>
-                  <div style={styles.styleGuide}>
-                    <div><span style={styles.sgLabel}>Display Font:</span> {result.brand_style_guide.primary_font}</div>
-                    <div><span style={styles.sgLabel}>Accent Font:</span> {result.brand_style_guide.accent_font}</div>
-                    <div><span style={styles.sgLabel}>Mood:</span> {result.brand_style_guide.mood}</div>
-                    <div style={styles.palette}>
-                      {(result.brand_style_guide.color_palette || []).map((c, i) => (
-                        <div key={i} style={{ ...styles.swatch, background: c }} title={c} onClick={() => copy(c, `color${i}`)}>
-                          <span style={styles.swatchLabel}>{copied === `color${i}` ? "✓" : c}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div style={styles.actionRow}>
-                <button style={styles.btn} onClick={exportJSON}>⬇ Export JSON</button>
-                <button style={{ ...styles.btn, ...styles.btnOutline }} onClick={genVariations}>
-                  {loadingVariations ? "Generating..." : "🔀 Get Variations"}
-                </button>
-              </div>
+          {rendered && (
+            <div style={S.canvasActions}>
+              <button style={S.btn} onClick={downloadAd}>⬇ Download PNG</button>
+              <button style={{ ...S.btn, ...S.btnGhost }} onClick={regenerateImage}>🔄 Regenerate Image</button>
             </div>
-          </div>
-        )}
-
-        {activeTab === "result" && !result && (
-          <div style={styles.emptyState}>Generate an ad first to see results here.</div>
-        )}
-
-        {/* VARIATIONS TAB */}
-        {activeTab === "variations" && (
-          <div>
-            {variations ? (
-              <div style={styles.variationsGrid}>
-                {variations.map((v, i) => (
-                  <div key={i} style={styles.variationCard}>
-                    <div style={styles.varNum}>V{i + 1}</div>
-                    <div style={styles.varHeadline}>{v.headline}</div>
-                    <div style={styles.varSub}>{v.subheadline}</div>
-                    <p style={styles.varBody}>{v.body_copy}</p>
-                    <div style={styles.varCta}>{v.cta}</div>
-                    <button style={styles.copyBtn} onClick={() => copy(`${v.headline}\n${v.subheadline}\n${v.body_copy}\n${v.cta}`, `var${i}`)}>
-                      {copied === `var${i}` ? "✓ Copied All" : "Copy All"}
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div style={styles.emptyState}>
-                <p>Go to the Result tab and click "Get Variations" after generating an ad.</p>
-                {form.brand_name && (
-                  <button style={{ ...styles.btn, marginTop: 20 }} onClick={() => { genVariations(); }}>
-                    {loadingVariations ? "Generating..." : "⚡ Generate Variations Now"}
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </main>
+          )}
+        </main>
+      </div>
     </div>
   );
 }
 
-function AdPreview({ ad, brandName, large }) {
-  const colors = ad.brand_style_guide?.color_palette || ["#ff4d6d", "#7c3aed", "#f59e0b"];
-  const [c1, c2] = colors;
-
-  return (
-    <div style={{
-      ...styles.adCanvas,
-      background: `linear-gradient(135deg, ${c1 || "#ff4d6d"}22, ${c2 || "#7c3aed"}33)`,
-      border: `1px solid ${c1 || "#ff4d6d"}44`,
-      minHeight: large ? 320 : 240,
-    }}>
-      <div style={{ ...styles.adBrand, color: c1 || "#ff4d6d" }}>{brandName?.toUpperCase()}</div>
-      <div style={styles.adHeadline}>{ad.headline}</div>
-      <div style={styles.adSub}>{ad.subheadline}</div>
-      <div style={{ ...styles.adCta, background: c1 || "#ff4d6d" }}>{ad.cta}</div>
-      <div style={styles.adMood}>{ad.brand_style_guide?.mood || ""}</div>
-    </div>
-  );
+// ── Helpers ──────────────────────────────────────────────
+function wrapText(ctx, text, x, y, maxW, lineH) {
+  if (!text) return;
+  const words = text.split(" ");
+  let line = "";
+  let cy = y;
+  for (let w of words) {
+    const test = line + w + " ";
+    if (ctx.measureText(test).width > maxW && line !== "") {
+      ctx.fillText(line.trim(), x, cy);
+      line = w + " ";
+      cy += lineH;
+    } else line = test;
+  }
+  ctx.fillText(line.trim(), x, cy);
 }
 
-/* ---- Styles ---- */
-const styles = {
-  root: { minHeight: "100vh", background: "#0a0a0f", color: "#f0f0f8", fontFamily: "'DM Sans', sans-serif" },
-  header: { borderBottom: "1px solid #2a2a3a", padding: "0 32px", background: "#111118" },
-  headerInner: { maxWidth: 1400, margin: "0 auto", height: 64, display: "flex", alignItems: "center", justifyContent: "space-between" },
-  logo: { display: "flex", alignItems: "center", gap: 12 },
-  logoIcon: { fontSize: 28, color: "#ff4d6d" },
-  logoTitle: { fontFamily: "'Bebas Neue', sans-serif", fontSize: 24, letterSpacing: 3, color: "#f0f0f8" },
-  logoSub: { fontSize: 11, color: "#888899", letterSpacing: 2, textTransform: "uppercase" },
-  badge: { background: "#1a1a24", border: "1px solid #2a2a3a", padding: "6px 14px", borderRadius: 20, fontSize: 12, color: "#a78bfa" },
-  tabBar: { display: "flex", gap: 0, borderBottom: "1px solid #2a2a3a", padding: "0 32px", background: "#0d0d14" },
-  tab: { padding: "14px 24px", background: "none", border: "none", color: "#888899", cursor: "pointer", fontSize: 13, fontWeight: 500, borderBottom: "2px solid transparent", transition: "all .2s", fontFamily: "'DM Sans', sans-serif" },
-  tabActive: { color: "#ff4d6d", borderBottomColor: "#ff4d6d" },
-  main: { maxWidth: 1400, margin: "0 auto", padding: "32px" },
-  grid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, alignItems: "start" },
-  formCard: { background: "#111118", border: "1px solid #2a2a3a", borderRadius: 12, padding: 28, display: "flex", flexDirection: "column", gap: 16 },
-  sectionLabel: { fontFamily: "'Space Mono', monospace", fontSize: 10, letterSpacing: 3, color: "#ff4d6d", textTransform: "uppercase", marginBottom: 4 },
-  fieldGroup: { display: "flex", flexDirection: "column", gap: 6 },
-  label: { fontSize: 12, color: "#888899", fontWeight: 500, letterSpacing: 0.5 },
-  input: { background: "#0a0a0f", border: "1px solid #2a2a3a", borderRadius: 8, padding: "10px 14px", color: "#f0f0f8", fontSize: 14, outline: "none", fontFamily: "'DM Sans', sans-serif", transition: "border .2s" },
-  select: { background: "#0a0a0f", border: "1px solid #2a2a3a", borderRadius: 8, padding: "10px 14px", color: "#f0f0f8", fontSize: 14, outline: "none", fontFamily: "'DM Sans', sans-serif" },
-  textarea: { background: "#0a0a0f", border: "1px solid #2a2a3a", borderRadius: 8, padding: "10px 14px", color: "#f0f0f8", fontSize: 14, outline: "none", fontFamily: "'DM Sans', sans-serif", resize: "vertical" },
-  twoCol: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 },
-  error: { background: "#ff4d6d22", border: "1px solid #ff4d6d44", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#ff4d6d" },
-  btn: { background: "linear-gradient(135deg, #ff4d6d, #7c3aed)", border: "none", borderRadius: 8, padding: "13px 24px", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: "'DM Sans', sans-serif", transition: "opacity .2s" },
-  btnDisabled: { opacity: 0.5, cursor: "not-allowed" },
-  btnSm: { padding: "10px 18px", whiteSpace: "nowrap" },
-  btnOutline: { background: "none", border: "1px solid #2a2a3a", color: "#f0f0f8" },
-  spinner: { width: 14, height: 14, border: "2px solid #ffffff44", borderTopColor: "#fff", borderRadius: "50%", animation: "spin 0.8s linear infinite", display: "inline-block" },
-  previewPanel: { background: "#111118", border: "1px solid #2a2a3a", borderRadius: 12, padding: 28 },
-  emptyPreview: { display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: 300, gap: 16, color: "#888899", textAlign: "center", fontSize: 14 },
-  emptyIcon: { fontSize: 48, color: "#2a2a3a" },
-  adCanvas: { borderRadius: 10, padding: 28, display: "flex", flexDirection: "column", gap: 12, position: "relative", overflow: "hidden" },
-  adBrand: { fontFamily: "'Space Mono', monospace", fontSize: 11, letterSpacing: 4, fontWeight: 700 },
-  adHeadline: { fontFamily: "'Bebas Neue', sans-serif", fontSize: 38, lineHeight: 1.1, color: "#f0f0f8" },
-  adSub: { fontSize: 14, color: "#ccccdd", lineHeight: 1.5, maxWidth: "80%" },
-  adCta: { display: "inline-block", padding: "8px 20px", borderRadius: 20, fontSize: 12, fontWeight: 700, color: "#fff", width: "fit-content", marginTop: 8 },
-  adMood: { fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#888899", letterSpacing: 2, marginTop: 4 },
-  resultLayout: { display: "grid", gridTemplateColumns: "1fr 1.2fr", gap: 24, alignItems: "start" },
-  resultLeft: { display: "flex", flexDirection: "column", gap: 20 },
-  resultRight: { display: "flex", flexDirection: "column", gap: 16 },
-  refineBox: { background: "#111118", border: "1px solid #2a2a3a", borderRadius: 12, padding: 20, display: "flex", flexDirection: "column", gap: 12 },
-  refineRow: { display: "flex", gap: 10 },
-  copyBlock: { background: "#111118", border: "1px solid #2a2a3a", borderRadius: 10, padding: 16, display: "flex", flexDirection: "column", gap: 8 },
-  copyBlockHeader: { display: "flex", justifyContent: "space-between", alignItems: "center" },
-  copyLabel: { fontFamily: "'Space Mono', monospace", fontSize: 10, letterSpacing: 2, color: "#888899" },
-  copyBtn: { background: "#1a1a24", border: "1px solid #2a2a3a", borderRadius: 6, padding: "4px 10px", fontSize: 11, color: "#a78bfa", cursor: "pointer", fontFamily: "'DM Sans', sans-serif" },
-  copyText: { fontSize: 14, color: "#f0f0f8", lineHeight: 1.6 },
-  styleGuide: { display: "flex", flexDirection: "column", gap: 8, fontSize: 13, color: "#ccccdd" },
-  sgLabel: { color: "#888899", marginRight: 6 },
-  palette: { display: "flex", gap: 8, marginTop: 4 },
-  swatch: { width: 60, height: 36, borderRadius: 6, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" },
-  swatchLabel: { fontSize: 9, color: "#fff", textShadow: "0 1px 3px #00000088", fontFamily: "'Space Mono', monospace" },
-  actionRow: { display: "flex", gap: 12 },
-  emptyState: { textAlign: "center", color: "#888899", padding: 80, fontSize: 15 },
-  variationsGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 20 },
-  variationCard: { background: "#111118", border: "1px solid #2a2a3a", borderRadius: 12, padding: 24, display: "flex", flexDirection: "column", gap: 10 },
-  varNum: { fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#ff4d6d", letterSpacing: 2 },
-  varHeadline: { fontFamily: "'Bebas Neue', sans-serif", fontSize: 26, color: "#f0f0f8" },
-  varSub: { fontSize: 13, color: "#a78bfa", fontWeight: 500 },
-  varBody: { fontSize: 13, color: "#888899", lineHeight: 1.6 },
-  varCta: { background: "#1a1a24", border: "1px solid #2a2a3a", padding: "6px 14px", borderRadius: 20, fontSize: 12, color: "#f59e0b", width: "fit-content", fontWeight: 600 },
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function Spin({ large }) {
+  return <span style={{
+    width: large ? 40 : 14, height: large ? 40 : 14,
+    border: `${large ? 4 : 2}px solid #ffffff22`,
+    borderTopColor: "#ff4d6d",
+    borderRadius: "50%",
+    display: "inline-block",
+    animation: "spin 0.8s linear infinite",
+    flexShrink: 0
+  }} />;
+}
+
+// ── Styles ───────────────────────────────────────────────
+const S = {
+  root: { minHeight: "100vh", background: "#08080f", color: "#f0f0f8", fontFamily: "'DM Sans', sans-serif", display: "flex", flexDirection: "column" },
+  header: { background: "#0f0f1a", borderBottom: "1px solid #1e1e2e", padding: "0 32px", height: 64, display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 },
+  logoWrap: { display: "flex", alignItems: "center", gap: 12 },
+  logoMark: { fontSize: 26, color: "#ff4d6d" },
+  logoTitle: { fontSize: 22, fontWeight: 800, letterSpacing: 3, fontFamily: "sans-serif" },
+  logoSub: { fontSize: 10, color: "#666677", letterSpacing: 2, textTransform: "uppercase" },
+  pill: { background: "#1a1a2e", border: "1px solid #2a2a3e", borderRadius: 20, padding: "5px 14px", fontSize: 11, color: "#a78bfa" },
+  layout: { display: "flex", flex: 1, overflow: "hidden" },
+  sidebar: { width: 340, flexShrink: 0, background: "#0f0f1a", borderRight: "1px solid #1e1e2e", padding: "24px 20px", overflowY: "auto", display: "flex", flexDirection: "column", gap: 14 },
+  sectionLabel: { fontFamily: "monospace", fontSize: 10, letterSpacing: 3, color: "#ff4d6d", textTransform: "uppercase" },
+  field: { display: "flex", flexDirection: "column", gap: 5 },
+  label: { fontSize: 11, color: "#666677", fontWeight: 600, letterSpacing: 0.5 },
+  input: { background: "#08080f", border: "1px solid #1e1e2e", borderRadius: 8, padding: "9px 12px", color: "#f0f0f8", fontSize: 13, outline: "none", fontFamily: "inherit" },
+  select: { background: "#08080f", border: "1px solid #1e1e2e", borderRadius: 8, padding: "9px 12px", color: "#f0f0f8", fontSize: 13, outline: "none", fontFamily: "inherit" },
+  textarea: { background: "#08080f", border: "1px solid #1e1e2e", borderRadius: 8, padding: "9px 12px", color: "#f0f0f8", fontSize: 13, outline: "none", fontFamily: "inherit", resize: "vertical" },
+  error: { background: "#ff4d6d18", border: "1px solid #ff4d6d44", borderRadius: 8, padding: "10px 12px", fontSize: 12, color: "#ff4d6d" },
+  btn: { background: "linear-gradient(135deg, #ff4d6d, #7c3aed)", border: "none", borderRadius: 8, padding: "12px 20px", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: "inherit" },
+  btnOff: { opacity: 0.5, cursor: "not-allowed" },
+  btnGhost: { background: "none", border: "1px solid #2a2a3e", color: "#f0f0f8" },
+  actionGroup: { display: "flex", flexDirection: "column", gap: 8 },
+  canvasWrap: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32, gap: 20, overflowY: "auto", background: "#08080f" },
+  placeholder: { display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, textAlign: "center" },
+  placeholderIcon: { fontSize: 64, color: "#1e1e2e" },
+  placeholderText: { fontSize: 18, color: "#444455", fontWeight: 600 },
+  placeholderSub: { fontSize: 13, color: "#333344" },
+  progressBar: { width: 280, height: 4, background: "#1e1e2e", borderRadius: 2, overflow: "hidden", marginTop: 8 },
+  progressFill: { height: "100%", background: "linear-gradient(90deg, #ff4d6d, #7c3aed)", borderRadius: 2, transition: "width 0.5s ease" },
+  canvas: { maxWidth: "100%", maxHeight: "80vh", borderRadius: 12, boxShadow: "0 0 60px #ff4d6d22, 0 0 120px #7c3aed11" },
+  canvasActions: { display: "flex", gap: 12 },
 };
 
-// Spinner animation
-const styleEl = document.createElement("style");
-styleEl.textContent = `@keyframes spin { to { transform: rotate(360deg); } }`;
-document.head.appendChild(styleEl);
+const _s = document.createElement("style");
+_s.textContent = `@keyframes spin{to{transform:rotate(360deg)}} input:focus,select:focus,textarea:focus{border-color:#ff4d6d!important;outline:none}`;
+document.head.appendChild(_s);
