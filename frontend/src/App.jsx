@@ -7,8 +7,54 @@ const AD_TYPES = ["Social Media Post", "Billboard", "Banner Ad", "Story/Reel", "
 const INDUSTRIES = ["Technology", "Fashion & Beauty", "Food & Beverage", "Healthcare", "Finance", "Real Estate", "Fitness & Wellness", "Education", "Travel", "Automotive", "Retail", "Entertainment"];
 
 function generateImageUrl(prompt) {
-  const full = prompt + ", professional advertisement, ultra high quality, 4k, cinematic lighting, commercial photography";
-  return `https://image.pollinations.ai/prompt/${encodeURIComponent(full)}?width=1024&height=1024&nologo=true&enhance=true&seed=${Math.floor(Math.random() * 99999)}`;
+  const full = prompt + ", professional advertisement, ultra high quality, 4k, cinematic lighting, commercial photography, no text, no watermark, no logo, clean";
+  return `https://image.pollinations.ai/prompt/${encodeURIComponent(full)}?width=1024&height=1024&nologo=true&nofeed=true&enhance=true&seed=${Math.floor(Math.random() * 99999)}`;
+}
+
+function wrapText(ctx, text, x, y, maxW, lineH) {
+  if (!text) return y;
+  const words = text.split(" ");
+  let line = "";
+  let cy = y;
+  for (let w of words) {
+    const test = line + w + " ";
+    if (ctx.measureText(test).width > maxW && line !== "") {
+      ctx.fillText(line.trim(), x, cy);
+      line = w + " ";
+      cy += lineH;
+    } else {
+      line = test;
+    }
+  }
+  ctx.fillText(line.trim(), x, cy);
+  return cy + lineH;
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function Spin({ large }) {
+  return <span style={{
+    width: large ? 40 : 14, height: large ? 40 : 14,
+    border: `${large ? 4 : 2}px solid #ffffff22`,
+    borderTopColor: "#ff4d6d",
+    borderRadius: "50%",
+    display: "inline-block",
+    animation: "spin 0.8s linear infinite",
+    flexShrink: 0
+  }} />;
 }
 
 export default function App() {
@@ -25,6 +71,161 @@ export default function App() {
   const canvasRef = useRef(null);
 
   const update = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const renderCanvas = (img, adData) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const W = 1080, H = 1080;
+    canvas.width = W; canvas.height = H;
+
+    // 1. Draw background image — crop center to cover watermarks at edges
+    const srcSize = Math.min(img.width, img.height);
+    const sx = (img.width - srcSize) / 2;
+    const sy = (img.height - srcSize) / 2;
+    ctx.drawImage(img, sx, sy, srcSize, srcSize, 0, 0, W, H);
+
+    // 2. Cover bottom 120px with solid dark — hides any AI watermark text
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(0, H - 130, W, 130);
+
+    // 3. Cover top 10px — hides any top watermarks
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(0, 0, W, 10);
+
+    const palette = adData.brand_style_guide?.color_palette || ["#ff4d6d", "#7c3aed", "#f59e0b"];
+    const accent  = palette[0] || "#ff4d6d";
+    const accent2 = palette[1] || "#7c3aed";
+
+    // 4. Dark gradient overlay
+    const grad = ctx.createLinearGradient(0, H * 0.2, 0, H - 130);
+    grad.addColorStop(0, "rgba(0,0,0,0)");
+    grad.addColorStop(0.45, "rgba(0,0,0,0.55)");
+    grad.addColorStop(1, "rgba(0,0,0,0.92)");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H - 130);
+
+    // ── TOP BAR ───────────────────────────────────────────
+    const topGrad = ctx.createLinearGradient(0, 0, W, 0);
+    topGrad.addColorStop(0, accent + "ee");
+    topGrad.addColorStop(1, accent2 + "bb");
+    ctx.fillStyle = topGrad;
+    ctx.fillRect(0, 10, W, 68);
+
+    // Brand name — left
+    ctx.save();
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 28px Arial";
+    ctx.letterSpacing = "4px";
+    ctx.textBaseline = "middle";
+    ctx.fillText(form.brand_name.toUpperCase(), 36, 44);
+    ctx.restore();
+
+    // Ad type pill — RIGHT, measured so it never clips
+    ctx.save();
+    ctx.font = "bold 12px Arial";
+    ctx.letterSpacing = "2px";
+    ctx.textBaseline = "middle";
+    const adLabel = form.ad_type.toUpperCase();
+    const adLabelW = ctx.measureText(adLabel).width;
+    const pillW = adLabelW + 40;
+    const pillX = W - pillW - 24;
+    const pillY = 22;
+    const pillH = 34;
+    ctx.fillStyle = "rgba(255,255,255,0.20)";
+    roundRect(ctx, pillX, pillY, pillW, pillH, 17);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(adLabel, pillX + 20, pillY + pillH / 2);
+    ctx.restore();
+
+    // ── LEFT ACCENT LINE ──────────────────────────────────
+    ctx.fillStyle = accent;
+    ctx.fillRect(36, H * 0.48, 6, 140);
+
+    // ── HEADLINE ──────────────────────────────────────────
+    ctx.save();
+    ctx.letterSpacing = "1px";
+    ctx.textBaseline = "alphabetic";
+    const hSize = adData.headline.length > 22 ? 58 : 70;
+    ctx.font = `bold ${hSize}px Arial`;
+    ctx.fillStyle = "#ffffff";
+    let curY = H * 0.52;
+    curY = wrapText(ctx, adData.headline.toUpperCase(), 56, curY, W - 80, hSize + 8);
+    ctx.restore();
+
+    // ── SUBHEADLINE ───────────────────────────────────────
+    ctx.save();
+    ctx.font = "500 24px Arial";
+    ctx.letterSpacing = "0px";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = "rgba(255,255,255,0.82)";
+    curY += 10;
+    curY = wrapText(ctx, adData.subheadline, 56, curY, W - 80, 34);
+    ctx.restore();
+
+    // ── BODY COPY ─────────────────────────────────────────
+    ctx.save();
+    ctx.font = "17px Arial";
+    ctx.letterSpacing = "0px";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = "rgba(255,255,255,0.58)";
+    curY += 16;
+    curY = wrapText(ctx, adData.body_copy, 56, curY, W - 80, 26);
+    ctx.restore();
+
+    // ── CTA BUTTON — always BELOW body copy, min 20px gap ─
+    ctx.save();
+    ctx.font = "bold 20px Arial";
+    ctx.letterSpacing = "1px";
+    ctx.textBaseline = "middle";
+    const ctaText = adData.cta.toUpperCase();
+    const ctaTextW = ctx.measureText(ctaText).width;
+    const ctaW = ctaTextW + 72;
+    const ctaH = 56;
+    const ctaX = 56;
+    const ctaY = curY + 22; // always below body copy
+
+    const ctaGrad = ctx.createLinearGradient(ctaX, ctaY, ctaX + ctaW, ctaY);
+    ctaGrad.addColorStop(0, accent);
+    ctaGrad.addColorStop(1, accent2);
+    ctx.fillStyle = ctaGrad;
+    roundRect(ctx, ctaX, ctaY, ctaW, ctaH, 28);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(ctaText, ctaX + 36, ctaY + ctaH / 2);
+    ctx.restore();
+
+    // ── BOTTOM BAR (replaces watermark zone) ─────────────
+    // Already black from step 2; now add brand info
+    const bY = H - 65;
+
+    // Tagline left in bottom bar
+    if (form.tagline) {
+      ctx.save();
+      ctx.font = "italic 17px Arial";
+      ctx.letterSpacing = "0px";
+      ctx.fillStyle = "rgba(255,255,255,0.5)";
+      ctx.textBaseline = "middle";
+      ctx.fillText(`"${form.tagline}"`, 36, bY);
+      ctx.restore();
+    }
+
+    // Color swatches — bottom right in bottom bar
+    const swatchR = 10;
+    const swatchGap = 26;
+    const numS = Math.min(palette.length, 3);
+    palette.slice(0, numS).forEach((c, i) => {
+      const sx2 = W - 36 - (numS - 1 - i) * swatchGap;
+      ctx.beginPath();
+      ctx.arc(sx2, bY, swatchR, 0, Math.PI * 2);
+      ctx.fillStyle = c;
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.35)";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    });
+
+    setRendered(true);
+  };
 
   const generate = async () => {
     if (!form.brand_name || !form.industry) { setError("Brand name and industry are required."); return; }
@@ -59,135 +260,17 @@ export default function App() {
     }
   };
 
-  const renderCanvas = (img, adData) => {
-  const canvas = canvasRef.current;
-  if (!canvas) return;
-  const ctx = canvas.getContext("2d");
-  const W = 1080, H = 1080;
-  canvas.width = W; canvas.height = H;
-
-  // Background image
-  ctx.drawImage(img, 0, 0, W, H);
-
-  // Dark gradient overlay — bottom 60%
-  const grad = ctx.createLinearGradient(0, H * 0.25, 0, H);
-  grad.addColorStop(0, "rgba(0,0,0,0)");
-  grad.addColorStop(0.4, "rgba(0,0,0,0.6)");
-  grad.addColorStop(1, "rgba(0,0,0,0.93)");
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, W, H);
-
-  const palette = adData.brand_style_guide?.color_palette || ["#ff4d6d", "#7c3aed", "#f59e0b"];
-  const accent  = palette[0] || "#ff4d6d";
-  const accent2 = palette[1] || "#7c3aed";
-
-  // ── TOP BAR ──────────────────────────────────────────
-  const topGrad = ctx.createLinearGradient(0, 0, W, 0);
-  topGrad.addColorStop(0, accent + "ee");
-  topGrad.addColorStop(1, accent2 + "bb");
-  ctx.fillStyle = topGrad;
-  ctx.fillRect(0, 0, W, 70);
-
-  // Brand name
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 30px Arial";
-  ctx.letterSpacing = "4px";
-  ctx.textBaseline = "middle";
-  ctx.fillText(form.brand_name.toUpperCase(), 36, 35);
-
-  // Ad type — right aligned, no cutoff
-  ctx.font = "13px Arial";
-  ctx.letterSpacing = "2px";
-  const adTypeText = form.ad_type.toUpperCase();
-  const adTypeW = ctx.measureText(adTypeText).width;
-  // pill background
-  ctx.fillStyle = "rgba(255,255,255,0.18)";
-  roundRect(ctx, W - adTypeW - 60, 18, adTypeW + 36, 34, 17);
-  ctx.fillStyle = "#ffffff";
-  ctx.fillText(adTypeText, W - adTypeW - 42, 35);
-
-  // ── LEFT ACCENT LINE ─────────────────────────────────
-  ctx.fillStyle = accent;
-  ctx.fillRect(36, H * 0.50, 6, 130);
-
-  // ── HEADLINE ─────────────────────────────────────────
-  ctx.letterSpacing = "1px";
-  ctx.textBaseline = "alphabetic";
-  const headlineSize = adData.headline.length > 20 ? 62 : 72;
-  ctx.font = `bold ${headlineSize}px Arial`;
-  ctx.fillStyle = "#ffffff";
-  const headlineY = wrapText(ctx, adData.headline.toUpperCase(), 56, H * 0.52, W - 80, headlineSize + 10);
-
-  // ── SUBHEADLINE ───────────────────────────────────────
-  ctx.font = "500 26px Arial";
-  ctx.letterSpacing = "0px";
-  ctx.fillStyle = "rgba(255,255,255,0.85)";
-  const subY = wrapText(ctx, adData.subheadline, 56, headlineY + 36, W - 80, 36);
-
-  // ── BODY COPY ─────────────────────────────────────────
-  ctx.font = "18px Arial";
-  ctx.letterSpacing = "0px";
-  ctx.fillStyle = "rgba(255,255,255,0.60)";
-  const bodyY = wrapText(ctx, adData.body_copy, 56, subY + 30, W - 80, 28);
-
-  // ── CTA BUTTON — always below body copy ──────────────
-  const ctaText = adData.cta.toUpperCase();
-  ctx.font = "bold 20px Arial";
-  ctx.letterSpacing = "1px";
-  const ctaTextW = ctx.measureText(ctaText).width;
-  const ctaW = ctaTextW + 70;
-  const ctaH = 58;
-  const ctaX = 56;
-  const ctaY = Math.max(bodyY + 30, H - 160); // never overlap body
-
-  const ctaGrad = ctx.createLinearGradient(ctaX, ctaY, ctaX + ctaW, ctaY);
-  ctaGrad.addColorStop(0, accent);
-  ctaGrad.addColorStop(1, accent2);
-  ctx.fillStyle = ctaGrad;
-  roundRect(ctx, ctaX, ctaY, ctaW, ctaH, 29);
-
-  ctx.fillStyle = "#ffffff";
-  ctx.textBaseline = "middle";
-  ctx.fillText(ctaText, ctaX + 35, ctaY + ctaH / 2);
-
-  // ── BOTTOM ROW: tagline left, swatches right ──────────
-  ctx.textBaseline = "alphabetic";
-  const bottomY = H - 28;
-
-  // Tagline bottom LEFT
-  if (form.tagline) {
-    ctx.font = "italic 17px Arial";
-    ctx.letterSpacing = "0px";
-    ctx.fillStyle = "rgba(255,255,255,0.45)";
-    ctx.fillText(`"${form.tagline}"`, 36, bottomY);
-  }
-
-  // Color swatches bottom RIGHT — with spacing
-  const swatchR = 11;
-  const swatchGap = 28;
-  const numSwatches = Math.min(palette.length, 3);
-  const swatchStartX = W - 36 - (numSwatches - 1) * swatchGap;
-  palette.slice(0, numSwatches).forEach((c, i) => {
-    ctx.fillStyle = c;
-    ctx.beginPath();
-    ctx.arc(swatchStartX + i * swatchGap, bottomY - swatchR, swatchR, 0, Math.PI * 2);
-    ctx.fill();
-    // white border
-    ctx.strokeStyle = "rgba(255,255,255,0.3)";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-  });
-
-  setRendered(true);
-};
-
   const regenerateImage = () => {
     if (!ad) return;
     setRendered(false); setImageUrl(""); setImageLoading(true);
     const url = generateImageUrl(ad.image_prompt);
     const img = new window.Image();
     img.crossOrigin = "anonymous";
-    img.onload = () => { setImageUrl(url); setImageLoading(false); setTimeout(() => renderCanvas(img, ad), 100); };
+    img.onload = () => {
+      setImageUrl(url);
+      setImageLoading(false);
+      setTimeout(() => renderCanvas(img, ad), 100);
+    };
     img.onerror = () => { setImageLoading(false); setError("Image failed. Try again."); };
     img.src = url;
   };
@@ -217,7 +300,6 @@ export default function App() {
       </header>
 
       <div style={S.layout}>
-        {/* LEFT — Form */}
         <aside style={S.sidebar}>
           <div style={S.sectionLabel}>BRAND DETAILS</div>
 
@@ -266,7 +348,7 @@ export default function App() {
           {error && <div style={S.error}>{error}</div>}
 
           <button style={{ ...S.btn, ...(isLoading ? S.btnOff : {}) }} onClick={generate} disabled={isLoading}>
-            {isLoading ? <><Spin /> {adLoading ? "Writing Ad Copy..." : "Generating Image (10-20s)..."}</> : "⚡ Generate Ad Image"}
+            {isLoading ? <><Spin /> {adLoading ? "Writing Ad Copy..." : "Generating Image..."}</> : "⚡ Generate Ad Image"}
           </button>
 
           {rendered && (
@@ -279,13 +361,12 @@ export default function App() {
           )}
         </aside>
 
-        {/* RIGHT — Canvas Output */}
         <main style={S.canvasWrap}>
           {!rendered && !isLoading && (
             <div style={S.placeholder}>
               <div style={S.placeholderIcon}>◈</div>
-              <p style={S.placeholderText}>Your complete ad image will appear here</p>
-              <p style={S.placeholderSub}>Fill in the form and click Generate</p>
+              <p style={S.placeholderText}>Your ad image will appear here</p>
+              <p style={S.placeholderSub}>Fill the form and click Generate</p>
             </div>
           )}
 
@@ -293,29 +374,21 @@ export default function App() {
             <div style={S.placeholder}>
               <Spin large />
               <p style={S.placeholderText}>
-                {adLoading ? "✍️ Writing ad copy with Groq..." : "🎨 Generating image with AI..."}
+                {adLoading ? "✍️ Writing ad copy with Groq..." : "🎨 Generating image..."}
               </p>
-              <p style={S.placeholderSub}>
-                {imageLoading ? "This takes 10–20 seconds — free GPU queue" : ""}
-              </p>
+              <p style={S.placeholderSub}>{imageLoading ? "Takes 10–20 seconds" : ""}</p>
               <div style={S.progressBar}>
                 <div style={{ ...S.progressFill, width: adLoading ? "35%" : "85%" }} />
               </div>
             </div>
           )}
 
-          <canvas
-            ref={canvasRef}
-            style={{
-              ...S.canvas,
-              display: rendered ? "block" : "none"
-            }}
-          />
+          <canvas ref={canvasRef} style={{ ...S.canvas, display: rendered ? "block" : "none" }} />
 
           {rendered && (
             <div style={S.canvasActions}>
               <button style={S.btn} onClick={downloadAd}>⬇ Download PNG</button>
-              <button style={{ ...S.btn, ...S.btnGhost }} onClick={regenerateImage}>🔄 Regenerate Image</button>
+              <button style={{ ...S.btn, ...S.btnGhost }} onClick={regenerateImage}>🔄 New Image</button>
             </div>
           )}
         </main>
@@ -324,64 +397,19 @@ export default function App() {
   );
 }
 
-// ── Helpers ──────────────────────────────────────────────
-function wrapText(ctx, text, x, y, maxW, lineH) {
-  if (!text) return;
-  const words = text.split(" ");
-  let line = "";
-  let cy = y;
-  for (let w of words) {
-    const test = line + w + " ";
-    if (ctx.measureText(test).width > maxW && line !== "") {
-      ctx.fillText(line.trim(), x, cy);
-      line = w + " ";
-      cy += lineH;
-    } else line = test;
-  }
-  ctx.fillText(line.trim(), x, cy);
-}
-
-function roundRect(ctx, x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + w - r, y);
-  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-  ctx.lineTo(x + r, y + h);
-  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-  ctx.lineTo(x, y + r);
-  ctx.quadraticCurveTo(x, y, x + r, y);
-  ctx.closePath();
-  ctx.fill();
-}
-
-function Spin({ large }) {
-  return <span style={{
-    width: large ? 40 : 14, height: large ? 40 : 14,
-    border: `${large ? 4 : 2}px solid #ffffff22`,
-    borderTopColor: "#ff4d6d",
-    borderRadius: "50%",
-    display: "inline-block",
-    animation: "spin 0.8s linear infinite",
-    flexShrink: 0
-  }} />;
-}
-
-// ── Styles ───────────────────────────────────────────────
 const S = {
   root: { minHeight: "100vh", background: "#08080f", color: "#f0f0f8", fontFamily: "'DM Sans', sans-serif", display: "flex", flexDirection: "column" },
   header: { background: "#0f0f1a", borderBottom: "1px solid #1e1e2e", padding: "0 32px", height: 64, display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 },
   logoWrap: { display: "flex", alignItems: "center", gap: 12 },
   logoMark: { fontSize: 26, color: "#ff4d6d" },
-  logoTitle: { fontSize: 22, fontWeight: 800, letterSpacing: 3, fontFamily: "sans-serif" },
+  logoTitle: { fontSize: 22, fontWeight: 800, letterSpacing: 3 },
   logoSub: { fontSize: 10, color: "#666677", letterSpacing: 2, textTransform: "uppercase" },
   pill: { background: "#1a1a2e", border: "1px solid #2a2a3e", borderRadius: 20, padding: "5px 14px", fontSize: 11, color: "#a78bfa" },
   layout: { display: "flex", flex: 1, overflow: "hidden" },
   sidebar: { width: 340, flexShrink: 0, background: "#0f0f1a", borderRight: "1px solid #1e1e2e", padding: "24px 20px", overflowY: "auto", display: "flex", flexDirection: "column", gap: 14 },
   sectionLabel: { fontFamily: "monospace", fontSize: 10, letterSpacing: 3, color: "#ff4d6d", textTransform: "uppercase" },
   field: { display: "flex", flexDirection: "column", gap: 5 },
-  label: { fontSize: 11, color: "#666677", fontWeight: 600, letterSpacing: 0.5 },
+  label: { fontSize: 11, color: "#666677", fontWeight: 600 },
   input: { background: "#08080f", border: "1px solid #1e1e2e", borderRadius: 8, padding: "9px 12px", color: "#f0f0f8", fontSize: 13, outline: "none", fontFamily: "inherit" },
   select: { background: "#08080f", border: "1px solid #1e1e2e", borderRadius: 8, padding: "9px 12px", color: "#f0f0f8", fontSize: 13, outline: "none", fontFamily: "inherit" },
   textarea: { background: "#08080f", border: "1px solid #1e1e2e", borderRadius: 8, padding: "9px 12px", color: "#f0f0f8", fontSize: 13, outline: "none", fontFamily: "inherit", resize: "vertical" },
@@ -390,14 +418,14 @@ const S = {
   btnOff: { opacity: 0.5, cursor: "not-allowed" },
   btnGhost: { background: "none", border: "1px solid #2a2a3e", color: "#f0f0f8" },
   actionGroup: { display: "flex", flexDirection: "column", gap: 8 },
-  canvasWrap: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32, gap: 20, overflowY: "auto", background: "#08080f" },
-  placeholder: { display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, textAlign: "center" },
+  canvasWrap: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32, gap: 20, overflowY: "auto" },
+  placeholder: { display: "flex", flexDirection: "column", alignItems: "center", gap: 16, textAlign: "center" },
   placeholderIcon: { fontSize: 64, color: "#1e1e2e" },
   placeholderText: { fontSize: 18, color: "#444455", fontWeight: 600 },
   placeholderSub: { fontSize: 13, color: "#333344" },
   progressBar: { width: 280, height: 4, background: "#1e1e2e", borderRadius: 2, overflow: "hidden", marginTop: 8 },
   progressFill: { height: "100%", background: "linear-gradient(90deg, #ff4d6d, #7c3aed)", borderRadius: 2, transition: "width 0.5s ease" },
-  canvas: { maxWidth: "100%", maxHeight: "80vh", borderRadius: 12, boxShadow: "0 0 60px #ff4d6d22, 0 0 120px #7c3aed11" },
+  canvas: { maxWidth: "100%", maxHeight: "80vh", borderRadius: 12, boxShadow: "0 0 60px #ff4d6d22" },
   canvasActions: { display: "flex", gap: 12 },
 };
 
